@@ -5,13 +5,55 @@ from __future__ import unicode_literals
 import os
 import json
 import argparse
+import time
+import random
 from youtubesearchpython import SearchVideos
 import youtube_dl
 from youtube_dl.utils import DownloadError
 from youtube_dl.utils import ExtractorError
 import spotipy
+import logging
+
+import discogs_client
+
 from config import CLIENT_ID
 from config import CLIENT_SECRET
+from config import DISCOGS_TOKEN
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+def create_connection(client_name):
+    """
+    Creates a connection to the Discogs API
+    """
+    conn = discogs_client.Client(client_name, user_token=DISCOGS_TOKEN)
+    return conn.identity()
+
+
+def search_stuff(conn, artist, title):
+    """
+    Search Discogs for artist title and youtube link if it exists.
+    """
+    results = conn.search(artist=artist, track=title)
+    for result in results:
+        try:
+            if result.videos:
+                logger.info(','.join(result.video))
+                for video in result.videos:
+                    return video.url
+        except:  # TODO: add proper exception
+            logger.info("no videos")
+    return False
+
+
+def discogs(client_name, artist, title):
+    """
+    Discogs entrypoint
+    """
+    con = create_connection(client_name)
+    return search_stuff(con.client, artist, title)
 
 
 def get_args():
@@ -70,13 +112,18 @@ def download_songs(spotify_info):
         wholename = "%s %s" % (song_name, song_artist)
         counter += 1
         print("%s)\t%s" % (counter, wholename))
-        track = get_yt_link(song_artist, song_name)
+        time.sleep(random.random()*10)
+        track = discogs('rb', song_artist, song_name)
+        if not track:
+            logger.warning("No release found on discogs, searching only youtube")
+            track = get_yt_link(song_artist, song_name)
+
         if track:
             if not yt_dl(track):
-                print(f"This track failed: {wholename}")
+                logger.error(f"This track failed: {wholename}")
                 failed.append(f"{song_artist} {song_name}")
         else:
-            print(f"This track failed: {wholename}")
+            logger.error(f"This track failed: {wholename}")
             failed.append(f"{song_artist} {song_name}")
 
 
@@ -102,10 +149,10 @@ def yt_dl(vid):
         try:
             ydl.download([vid])
         except DownloadError as dl_e:
-            print(f"Couldn't download: {dl_e}")
+            logger.error(f"Couldn't download: {dl_e}")
             return False
         except ExtractorError as extract_e:
-            print(f"Couldn't extract: {extract_e}")
+            logger.error(f"Couldn't extract: {extract_e}")
             return False
         return True
 
@@ -120,8 +167,8 @@ def get_yt_link(artist, song):
                           max_results=1)
     try:
         return search.links[0]
-    except IndexError as e:
-        print(f"No videos to download found: {e}")
+    except IndexError as err:
+        logger.warning(f"No videos to download found: {err}")
 
 
 def main():
